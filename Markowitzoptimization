@@ -1,0 +1,133 @@
+"""
+This is about the basic idea behind Markowitz portfolio optimization as well as how to do it in Python.
+Then show how you can create a simple backtest that rebalances its portfolio in a Markowitz-optimal way. 
+It will start by using random data and only later use actual stock data. 
+This will hopefully help you to get a sense of how to use modelling and simulation to improve your understanding of 
+the theoretical concepts behind Modern Portofolio Theory.
+
+"""
+%matplotlib inline
+import numpy as np
+import matplotlib.pyplot as plt
+import cvxopt as opt
+from cvxopt import blas, solvers
+import pandas as pd
+
+import plotly
+import cufflinks
+import chart_studio.plotly as py
+import plotly.tools as tls
+from plotly.graph_objs import *
+
+# Turn off progress printing
+solvers.options['show_progress'] = False
+
+## Number of Assets 
+n_assets = 4
+
+## Number of Observations
+n_obs = 1000
+
+return_vec = np.random.randn(n_assets, n_obs)
+
+"""
+Sample returns from a normal distributions using 4 assets, each
+with a return series of length 1000. Using numpy to sample returns
+from a normal distribution
+"""
+   
+fig = plt.figure()
+plt.plot(return_vec.T, alpha = .4);
+plt.xlabel('time')
+plt.ylabel('returns')
+plt.show()
+
+"""
+Producing a wide range of random weight vectors
+and plot those portfolios. As our capital to be invested,
+this vector will have to sum to one. 
+"""
+
+def rand_weights(n):
+    k = np.random.rand(n)
+    return k / sum(k)
+
+print(rand_weights(n_assets))
+print(rand_weights(n_assets))
+
+"""
+Evaulating how many of these random portfolios would
+perform. Calculating the mean returns as well as
+the volatility. 
+"""
+
+def random_portfolio(returns):
+    p = np.asmatrix(np.mean(returns, axis = 1))
+    w = np.asmatrix(rand_weights(returns.shape[0]))
+    C = np.asmatrix(np.cov(returns))
+    
+    mu = w * p.T
+    sigma = np.sqrt(w * C * w.T)
+    
+    # This recursion reduces outliers to keep plots simple
+    if sigma > 2:
+        return random_portfolio(returns)
+    return mu, sigma 
+    
+# Generating the mean returns and volatility for 500 random portofoliios
+n_portfolios = 500
+means, stds = np.column_stack([
+    random_portfolio(return_vec)
+    for x in range(n_portfolios)
+])
+
+# Plotting the mean and standard deviation of returns
+
+fig = plt.figure()
+plt.plot(stds, means, 'o', markersize=5)
+plt.xlabel('std')
+plt.ylabel('mean')
+plt.title('Mean and standard deviation of returns of randomly generated portfolios')
+plt.show()
+
+def optimal_portfolio(returns):
+    n = len(returns)
+    returns = np.asmatrix(returns)
+    
+    N = 100
+    mus = [10 **(5.0 * t/N - 1.0) for t in range(N)]
+    
+    # Convert to cvxopt matrices
+    S = opt.matrix(np.cov(returns))
+    pbar = opt.matrix(np.mean(returns, axis=1))
+    
+    # Create constraint matrices
+    G = -opt.matrix(np.eye(n))   # negative n x n identity matrix
+    h = opt.matrix(0.0, (n, 1))
+    A = opt.matrix(1.0, (1,n))
+    b = opt.matrix(1.0)
+    
+    # Calculate efficient frontier weights using quadratic programming
+    portfolios = [solvers.qp(mu*S, -pbar, G, h, A, b)['x'] for mu in mus]
+               
+    
+    # Calculate risks and returns for frontier
+    returns = [blas.dot(pbar, x) for x in portfolios]
+    risks = [np.sqrt(blas.dot(x, S*x)) for x in portfolios]
+    
+    # Calculate the 2nd degree polynomial of the frontier curve
+    m1 = np.polyfit(returns, risks, 2)
+    x1 = np.sqrt(m1[2]/m1[0])
+    
+    # Calculate the optimal portfolio
+    wt = solvers.qp(opt.matrix(x1 * S), -pbar, G, h, A, b)['x']
+    return np.asarray(wt), returns, risks
+
+weights, returns, risks = optimal_portfolio(return_vec)
+    
+fig = plt.figure()
+plt.plot(stds, means, 'o')
+plt.ylabel('mean')
+plt.xlabel('std')
+plt.plot(risks, returns, 'y-o')
+plt.show()
